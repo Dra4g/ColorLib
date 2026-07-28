@@ -1,0 +1,60 @@
+plugins {
+    id 'java'
+}
+
+group = 'it.dra4g'
+version = '1.0-SNAPSHOT'
+
+def foliaVersion = '26.1.2.build.8-stable'
+def jmhVersion = '1.37'
+
+repositories {
+    mavenCentral()
+    maven {
+        name = 'papermc'
+        url = uri('https://repo.papermc.io/repository/maven-public/')
+    }
+}
+
+sourceSets {
+    jmh {
+        java.srcDir 'src/jmh/java'
+        resources.srcDir 'src/jmh/resources'
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += output + compileClasspath
+    }
+}
+
+configurations {
+    jmhImplementation.extendsFrom implementation
+    jmhCompileOnly.extendsFrom compileOnly
+}
+
+dependencies {
+    compileOnly "dev.folia:folia-api:${foliaVersion}"
+
+    testImplementation platform('org.junit:junit-bom:6.0.0')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly "dev.folia:folia-api:${foliaVersion}"
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+    jmhImplementation "dev.folia:folia-api:${foliaVersion}"
+    jmhImplementation "org.openjdk.jmh:jmh-core:${jmhVersion}"
+    jmhAnnotationProcessor "org.openjdk.jmh:jmh-generator-annprocess:${jmhVersion}"
+}
+
+test {
+    useJUnitPlatform()
+}
+
+tasks.register('jmh', JavaExec) {
+    group = 'benchmark'
+    description = 'Runs the CC Classic, CC-Premium and Paper/Kyori nanosecond benchmark.'
+    dependsOn tasks.named('jmhClasses')
+    classpath = sourceSets.jmh.runtimeClasspath
+    mainClass = 'it.dra4g.benchmark.ColorBenchmark'
+
+    if (providers.gradleProperty('jmhArgs').isPresent()) {
+        args providers.gradleProperty('jmhArgs').get().trim().split(/\s+/)
+    }
+}
