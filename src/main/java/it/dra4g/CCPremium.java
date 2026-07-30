@@ -18,8 +18,6 @@ public final class CCPremium {
             0x555555, 0x5555FF, 0x55FF55, 0x55FFFF, 0xFF5555, 0xFF55FF, 0xFFFF55, 0xFFFFFF
     };
     private static final char[] C = "0123456789abcdef".toCharArray();
-    private static final long SD = 0x3ffL << 48;
-    private static final long SA = (0x3fL << 33) | (1L << 50);
 
     /*
      0 = unresolved,
@@ -218,9 +216,17 @@ public final class CCPremium {
                 || s.charAt(0) != COLOR_CHAR)
             return false;
 
+        final char x;
+        x = s.charAt(1);
         final char z;
-        z = lo(s.charAt(1));
-        return z == 'x' ? hex(s, 0) : start(z);
+        z = (char) (x | 32);
+        return (x >= '0'
+                && x <= '9')
+                || (z >= 'a'
+                && z <= 'f')
+                || z == 'r'
+                || (z == 'x'
+                && hex(s, 0));
     }
 
     /*
@@ -279,9 +285,7 @@ public final class CCPremium {
         final int n;
         n = s.length();
         int i;
-        if ((i = s.indexOf(COLOR_CHAR))
-                < 0)
-            return s;
+        if ((i = s.indexOf(COLOR_CHAR)) < 0) return s;
 
         int k = i;
         while (k < n) {
@@ -323,29 +327,26 @@ public final class CCPremium {
 
     private static boolean hex(final String s,
                                final int i) {
-        return i + HEX_TOKEN_LENGTH
-                <= s.length()
-                && s.charAt(i)
-                == COLOR_CHAR
-                && lo(s.charAt(i + 1))
-                == 'x'
-                && s.charAt(i + 2)
-                == COLOR_CHAR
+        if (i + HEX_TOKEN_LENGTH
+                > s.length()
+                || s.charAt(i)
+                != COLOR_CHAR
+                || lo(s.charAt(i + 1))
+                != 'x')
+            return false;
+
+        return ((s.charAt(i + 2) ^ COLOR_CHAR)
+                | (s.charAt(i + 4) ^ COLOR_CHAR)
+                | (s.charAt(i + 6) ^ COLOR_CHAR)
+                | (s.charAt(i + 8) ^ COLOR_CHAR)
+                | (s.charAt(i + 10) ^ COLOR_CHAR)
+                | (s.charAt(i + 12) ^ COLOR_CHAR))
+                == 0
                 && hx(s.charAt(i + 3))
-                && s.charAt(i + 4)
-                == COLOR_CHAR
                 && hx(s.charAt(i + 5))
-                && s.charAt(i + 6)
-                == COLOR_CHAR
                 && hx(s.charAt(i + 7))
-                && s.charAt(i + 8)
-                == COLOR_CHAR
                 && hx(s.charAt(i + 9))
-                && s.charAt(i + 10)
-                == COLOR_CHAR
                 && hx(s.charAt(i + 11))
-                && s.charAt(i + 12)
-                == COLOR_CHAR
                 && hx(s.charAt(i + 13));
     }
 
@@ -422,19 +423,12 @@ public final class CCPremium {
 
     private static boolean color(final char x) {
         return (x >= '0'
-                && x <= '9')
-                || (x >= 'a'
-                && x <= 'f');
-    }
-
-    private static boolean start(final char x) {
-        return x < 128
-                && ((((x < 64
-                    ? SD
-                    : SA)
-                >>> (x & 63))
-                & 1L)
-                != 0);
+                && x
+                <= '9')
+                || (x
+                >= 'a'
+                && x
+                <= 'f');
     }
 
     private static boolean code(final char x) {

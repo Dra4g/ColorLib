@@ -66,6 +66,18 @@ final class CCPremiumTest {
         }
     }
 
+    @Test
+    void everyStartingCodeMatchesClassic() {
+        final char[] value = {CC.COLOR_CHAR, 0};
+        for (int code = Character.MIN_VALUE;
+             code <= Character.MAX_VALUE;
+            code++) {
+            value[1] = (char) code;
+            final String input = new String(value);
+            assertEquals(CC.startsWithColor(input), CCPremium.startsWithColor(input), "code=" + code);
+        }
+    }
+
     private static void compareEveryOperation(final String value) {
         assertEquals(CC.translate(value), CCPremium.translate(value), "translate: " + value);
         assertEquals(CC.getLastColors(value), CCPremium.getLastColors(value), "last: " + value);
