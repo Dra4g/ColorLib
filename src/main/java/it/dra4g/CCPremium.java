@@ -37,52 +37,72 @@ public final class CCPremium {
         final int a;
         if ((a = s.indexOf(ALT_COLOR_CHAR)) < 0) return s;
 
-        final int q = n + ((n >>> 3) * 6);
+        final int mode = H;
+        final int q = mode < 0
+                ? n
+                : n + ((n >>> 3) * 6);
         //noinspection ManualMinMaxCalculation
         final char[] o = new char[q < n ? n : q];
-        if (a != 0) s.getChars(0, a, o, 0);
+        final int base = o.length - n;
+        s.getChars(0, n, o, base);
+        if (a != 0) System.arraycopy(o, base, o, 0, a);
 
         int i = a;
+        int r = base + a;
         int w = a;
-        int rgb = 0;
+        int rgb = mode;
 
         while (i < n) {
-            final char x = s.charAt(i);
+            final char x = o[r];
             if (x != ALT_COLOR_CHAR
                     || i + 1
                     >= n) {
                 o[w++] = x;
                 i++;
+                r++;
                 continue;
             }
 
-            final char y = s.charAt(i + 1);
+            final char y = o[r + 1];
             if (y == '#'
-                    && i + 7 < n
-                    && h6(s, i + 2)) {
-                if (rgb == 0) rgb = isHexSupported() ? 1 : -1;
-                if (rgb > 0) {
-                    o[w] = COLOR_CHAR;
-                    o[w + 1] = 'x';
-                    o[w + 2] = COLOR_CHAR;
-                    o[w + 3] = lo(s.charAt(i + 2));
-                    o[w + 4] = COLOR_CHAR;
-                    o[w + 5] = lo(s.charAt(i + 3));
-                    o[w + 6] = COLOR_CHAR;
-                    o[w + 7] = lo(s.charAt(i + 4));
-                    o[w + 8] = COLOR_CHAR;
-                    o[w + 9] = lo(s.charAt(i + 5));
-                    o[w + 10] = COLOR_CHAR;
-                    o[w + 11] = lo(s.charAt(i + 6));
-                    o[w + 12] = COLOR_CHAR;
-                    o[w + 13] = lo(s.charAt(i + 7));
-                    w += HEX_TOKEN_LENGTH;
-                } else {
-                    o[w++] = COLOR_CHAR;
-                    o[w++] = near(s, i + 2);
+                    && i + 7 < n) {
+                final char h0 = o[r + 2];
+                final char h1 = o[r + 3];
+                final char h2 = o[r + 4];
+                final char h3 = o[r + 5];
+                final char h4 = o[r + 6];
+                final char h5 = o[r + 7];
+                if (hx(h0)
+                        && hx(h1)
+                        && hx(h2)
+                        && hx(h3)
+                        && hx(h4)
+                        && hx(h5)) {
+                    if (rgb == 0) rgb = isHexSupported() ? 1 : -1;
+                    if (rgb > 0) {
+                        o[w] = COLOR_CHAR;
+                        o[w + 1] = 'x';
+                        o[w + 2] = COLOR_CHAR;
+                        o[w + 3] = (char) (h0 | 32);
+                        o[w + 4] = COLOR_CHAR;
+                        o[w + 5] = (char) (h1 | 32);
+                        o[w + 6] = COLOR_CHAR;
+                        o[w + 7] = (char) (h2 | 32);
+                        o[w + 8] = COLOR_CHAR;
+                        o[w + 9] = (char) (h3 | 32);
+                        o[w + 10] = COLOR_CHAR;
+                        o[w + 11] = (char) (h4 | 32);
+                        o[w + 12] = COLOR_CHAR;
+                        o[w + 13] = (char) (h5 | 32);
+                        w += HEX_TOKEN_LENGTH;
+                    } else {
+                        o[w++] = COLOR_CHAR;
+                        o[w++] = near(h0, h1, h2, h3, h4, h5);
+                    }
+                    i += 8;
+                    r += 8;
+                    continue;
                 }
-                i += 8;
-                continue;
             }
 
             //noinspection SuspiciousNameCombination
@@ -91,9 +111,11 @@ public final class CCPremium {
                 o[w++] = COLOR_CHAR;
                 o[w++] = z;
                 i += 2;
+                r += 2;
             } else {
                 o[w++] = x;
                 i++;
+                r++;
             }
         }
 
@@ -142,14 +164,6 @@ public final class CCPremium {
                 continue;
             }
 
-            final int hp;
-            if ((hp = owner(s, i))
-                    >= 0) {
-                p = hp;
-                l = HEX_TOKEN_LENGTH;
-                break;
-            }
-
             final char z;
             if ((z = lo(s
                     .charAt(i + 1)))
@@ -162,9 +176,20 @@ public final class CCPremium {
                 l = 0;
                 break;
             } else if (color(z)) {
+                final int hp;
+                if ((hp = owner(s, i)) >= 0) {
+                    p = hp;
+                    l = HEX_TOKEN_LENGTH;
+                } else {
+                    p = i;
+                    l = 2;
+                    lc = z;
+                }
+                break;
+            } else if (z == 'x'
+                    && hex(s, i)) {
                 p = i;
-                l = 2;
-                lc = z;
+                l = HEX_TOKEN_LENGTH;
                 break;
             }
             i = s.lastIndexOf(COLOR_CHAR, i - 1);
@@ -207,12 +232,7 @@ public final class CCPremium {
     }
 
     public static int bitCount(int i) {
-        i = i - ((i >>> 1) & 0x55555555);
-        i = (i & 0x33333333) + ((i >>> 2) & 0x33333333);
-        i = (i + (i >>> 4)) & 0x0f0f0f0f;
-        i = i + (i >>> 8);
-        i = i + (i >>> 16);
-        return i & 0x3f;
+        return Integer.bitCount(i);
     }
 
     /*
@@ -299,30 +319,34 @@ public final class CCPremium {
         int k = i;
         while (k < n) {
             if (s.charAt(k) == COLOR_CHAR
-                    && (hex(s, k)
-                    || (k + 1 < n
-                    && code(lo(s.charAt(k + 1))))))
-                break;
+                    && k + 1 < n) {
+                final char z = lo(s.charAt(k + 1));
+                if ((z == 'x' && hexTail(s, k))
+                        || code(z))
+                    break;
+            }
             k++;
         }
 
         if (k == n) return s;
 
-        final char[] o = new char[n];
-        if (k != 0) s.getChars(0, k, o, 0);
+        // The input copy is also the output buffer. Once a token is skipped,
+        // retained characters are compacted in place without a second array.
+        final char[] o = s.toCharArray();
         int w = k;
         i = k;
 
         while (i < n) {
-            final char x = s.charAt(i);
-            if (x == COLOR_CHAR) {
-                if (hex(s, i)) {
+            final char x = o[i];
+            if (x == COLOR_CHAR
+                    && i + 1 < n) {
+                final char z = lo(o[i + 1]);
+                if (z == 'x'
+                        && hexTail(o, i, n)) {
                     i += HEX_TOKEN_LENGTH;
                     continue;
                 }
-                if (i + 1 < n
-                        && code(lo(s
-                        .charAt(i + 1)))) {
+                if (code(z)) {
                     i += 2;
                     continue;
                 }
@@ -359,14 +383,43 @@ public final class CCPremium {
                 && hx(s.charAt(i + 13));
     }
 
-    private static boolean h6(final String s,
-                              final int i) {
-        return hx(s.charAt(i))
-                && hx(s.charAt(i + 1))
-                && hx(s.charAt(i + 2))
+    private static boolean hexTail(final String s,
+                                   final int i) {
+        if (i + HEX_TOKEN_LENGTH > s.length()) return false;
+
+        return ((s.charAt(i + 2) ^ COLOR_CHAR)
+                | (s.charAt(i + 4) ^ COLOR_CHAR)
+                | (s.charAt(i + 6) ^ COLOR_CHAR)
+                | (s.charAt(i + 8) ^ COLOR_CHAR)
+                | (s.charAt(i + 10) ^ COLOR_CHAR)
+                | (s.charAt(i + 12) ^ COLOR_CHAR))
+                == 0
                 && hx(s.charAt(i + 3))
-                && hx(s.charAt(i + 4))
-                && hx(s.charAt(i + 5));
+                && hx(s.charAt(i + 5))
+                && hx(s.charAt(i + 7))
+                && hx(s.charAt(i + 9))
+                && hx(s.charAt(i + 11))
+                && hx(s.charAt(i + 13));
+    }
+
+    private static boolean hexTail(final char[] s,
+                                   final int i,
+                                   final int n) {
+        if (i + HEX_TOKEN_LENGTH > n) return false;
+
+        return ((s[i + 2] ^ COLOR_CHAR)
+                | (s[i + 4] ^ COLOR_CHAR)
+                | (s[i + 6] ^ COLOR_CHAR)
+                | (s[i + 8] ^ COLOR_CHAR)
+                | (s[i + 10] ^ COLOR_CHAR)
+                | (s[i + 12] ^ COLOR_CHAR))
+                == 0
+                && hx(s[i + 3])
+                && hx(s[i + 5])
+                && hx(s[i + 7])
+                && hx(s[i + 9])
+                && hx(s[i + 11])
+                && hx(s[i + 13]);
     }
 
     private static int owner(final String s,
@@ -446,16 +499,20 @@ public final class CCPremium {
                 && x <= 'o')
                 || x == 'r';
     }
-    private static char near(final String s,
-                             final int p) {
+    private static char near(final char h0,
+                             final char h1,
+                             final char h2,
+                             final char h3,
+                             final char h4,
+                             final char h5) {
         int v = 0;
         //noinspection ConstantValue
-        v = (v << 4) | hv(s.charAt(p));
-        v = (v << 4) | hv(s.charAt(p + 1));
-        v = (v << 4) | hv(s.charAt(p + 2));
-        v = (v << 4) | hv(s.charAt(p + 3));
-        v = (v << 4) | hv(s.charAt(p + 4));
-        v = (v << 4) | hv(s.charAt(p + 5));
+        v = (v << 4) | hv(h0);
+        v = (v << 4) | hv(h1);
+        v = (v << 4) | hv(h2);
+        v = (v << 4) | hv(h3);
+        v = (v << 4) | hv(h4);
+        v = (v << 4) | hv(h5);
 
         final int rr = v >>> 16;
         final int gg = (v >>> 8) & 255;

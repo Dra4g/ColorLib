@@ -67,6 +67,31 @@ final class CCPremiumTest {
     }
 
     @Test
+    void inPlaceRgbExpansionDoesNotOverwriteUnreadInput() throws ReflectiveOperationException {
+        setHexMode(true);
+
+        for (int tokens = 1; tokens <= 128; tokens++) {
+            final StringBuilder value = new StringBuilder((tokens * 8) + 32);
+            value.append("p".repeat(tokens & 15));
+            for (int token = 0; token < tokens; token++) {
+                value.append(token % 2 == 0 ? "&#ABCDEF" : "&#012345");
+            }
+            value.append("&lTAIL").append(tokens);
+
+            assertEquals(CC.translate(value.toString()), CCPremium.translate(value.toString()),
+                    "tokens=" + tokens);
+        }
+    }
+
+    @Test
+    void inPlaceStripCompactionHandlesDenseAndUnicodeContent() {
+        final String value = ("\u00a7x\u00a7A\u00a7B\u00a7C\u00a7D\u00a7E\u00a7F"
+                + "\u00a7l\ud83d\udc31text\u00a7r\u00a7aX").repeat(128);
+
+        assertEquals(CC.stripColor(value), CCPremium.stripColor(value));
+    }
+
+    @Test
     void everyStartingCodeMatchesClassic() {
         final char[] value = {CC.COLOR_CHAR, 0};
         for (int code = Character.MIN_VALUE;
