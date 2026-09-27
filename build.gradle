@@ -35,7 +35,7 @@ dependencies {
 
     testImplementation platform('org.junit:junit-bom:6.0.0')
     testImplementation 'org.junit.jupiter:junit-jupiter'
-    testRuntimeOnly "dev.folia:folia-api:${foliaVersion}"
+    testImplementation "dev.folia:folia-api:${foliaVersion}"
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 
     jmhImplementation "dev.folia:folia-api:${foliaVersion}"
@@ -53,6 +53,18 @@ tasks.register('jmh', JavaExec) {
     dependsOn tasks.named('jmhClasses')
     classpath = sourceSets.jmh.runtimeClasspath
     mainClass = 'it.dra4g.benchmark.ColorBenchmark'
+
+    if (providers.gradleProperty('jmhArgs').isPresent()) {
+        args providers.gradleProperty('jmhArgs').get().trim().split(/\s+/)
+    }
+}
+
+tasks.register('jmhComponents', JavaExec) {
+    group = 'benchmark'
+    description = 'Runs the direct ColorLib component codec versus the previous Kyori pipeline.'
+    dependsOn tasks.named('jmhClasses')
+    classpath = sourceSets.jmh.runtimeClasspath
+    mainClass = 'it.dra4g.benchmark.ComponentBenchmark'
 
     if (providers.gradleProperty('jmhArgs').isPresent()) {
         args providers.gradleProperty('jmhArgs').get().trim().split(/\s+/)

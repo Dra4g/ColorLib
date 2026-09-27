@@ -1,5 +1,6 @@
 package it.dra4g;
 
+import net.kyori.adventure.text.Component;
 import org.bukkit.Bukkit;
 import sun.misc.Unsafe;
 
@@ -17,6 +18,23 @@ public final class CCPremium {
     public static final char COLOR_CHAR = '\u00a7';
     public static final char ALT_COLOR_CHAR = '&';
     public static final int HEX_TOKEN_LENGTH = 14;
+
+    public static final int BLACK = 0x000000;
+    public static final int DARK_BLUE = 0x0000AA;
+    public static final int DARK_GREEN = 0x00AA00;
+    public static final int DARK_AQUA = 0x00AAAA;
+    public static final int DARK_RED = 0xAA0000;
+    public static final int DARK_PURPLE = 0xAA00AA;
+    public static final int GOLD = 0xFFAA00;
+    public static final int GRAY = 0xAAAAAA;
+    public static final int DARK_GRAY = 0x555555;
+    public static final int BLUE = 0x5555FF;
+    public static final int GREEN = 0x55FF55;
+    public static final int AQUA = 0x55FFFF;
+    public static final int RED = 0xFF5555;
+    public static final int LIGHT_PURPLE = 0xFF55FF;
+    public static final int YELLOW = 0xFFFF55;
+    public static final int WHITE = 0xFFFFFF;
 
     private static final int[] R = {
             0x000000, 0x0000AA, 0x00AA00, 0x00AAAA, 0xAA0000, 0xAA00AA, 0xFFAA00, 0xAAAAAA,
@@ -64,6 +82,33 @@ public final class CCPremium {
     }
 
     private CCPremium() {}
+
+    /* Direct color parsing for Paper's Component APIs. The codec is loaded
+       only by these new entry points; existing String hot paths stay separate. */
+    public static Component component(final String text) {
+        if (text == null) return Component.empty();
+        /* Keep plain text outside the full parser. indexOf can use the JVM's
+           string-search intrinsics for both Latin-1 and UTF-16; no text copy.
+           BOTH markers matter: section-only input still needs decoding. */
+        if (text.indexOf('&') < 0
+                && text.indexOf('\u00a7') < 0) return Component.text(text);
+        return CCComponents.parse(text);
+    }
+
+    /* Literal text: user-supplied '&' and section signs are NOT parsed. */
+    public static Component text(final String text, final int rgb) {
+        return CCComponents.literal(text, rgb);
+    }
+
+    public static String plainText(final Component component) {
+        return CCComponents.write(component, false);
+    }
+
+    /* Legacy output retains RGB and decorations. Events/fonts cannot be
+       represented by legacy text; see the documented conversion contract. */
+    public static String serialize(final Component component) {
+        return CCComponents.write(component, true);
+    }
 
     public static String translate(final String s) {
         if (s == null) return null;
