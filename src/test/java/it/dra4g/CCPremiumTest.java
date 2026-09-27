@@ -7,6 +7,9 @@ import java.lang.reflect.Field;
 import java.util.Random;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 final class CCPremiumTest {
     private static final char[] ALPHABET = (
@@ -17,6 +20,28 @@ final class CCPremiumTest {
     @AfterEach
     void restoreModernMode() throws ReflectiveOperationException {
         setHexMode(true);
+    }
+
+    @Test
+    void hexSupportReadsBothCachedModes() throws ReflectiveOperationException {
+        setHexMode(false);
+        assertFalse(CCPremium.isHexSupported());
+        setHexMode(true);
+        assertTrue(CCPremium.isHexSupported());
+        setHexMode(false);
+        assertFalse(CCPremium.isHexSupported());
+    }
+
+    @Test
+    void unresolvedHexSupportPublishesTheResolvedMode() throws ReflectiveOperationException {
+        final Field state = CCPremium.class.getDeclaredField("H");
+        state.setAccessible(true);
+        state.setInt(null, 0);
+        /* No Bukkit server in these unit tests: existing contract assumes RGB
+           and caches that decision. Both read paths must see the same field. */
+        assertTrue(CCPremium.isHexSupported());
+        assertEquals(1, state.getInt(null));
+        assertTrue(CCPremium.isHexSupported());
     }
 
     @Test
@@ -103,6 +128,57 @@ final class CCPremiumTest {
         }
     }
 
+    @Test
+    void mixedTokensMatchClassicAtEveryBoundary() throws ReflectiveOperationException {
+        final String[] pieces = {
+                "plain", "\u732b\ud83d\udc31", "\ud800", "\udc00",
+                "&a", "&L", "&#ABCDEF", "&#012345", "&#GG0000", "&#123",
+                "\u00a7a", "\u00a7L", "\u00a7r", "\u00a7n", "\u00a7z", "\u00a7",
+                "\u00a7x\u00a71\u00a72\u00a73\u00a74\u00a75\u00a76",
+                "\u00a7X\u00a7A\u00a7B\u00a7C\u00a7D\u00a7E\u00a7F",
+                "\u00a7x\u00a71\u00a72\u00a7G\u00a74\u00a75\u00a76"
+        };
+        final Random random = new Random(0xC010B0);
+        for (final boolean modern : new boolean[]{true, false}) {
+            setHexMode(modern);
+            for (int sample = 0; sample < 2_000; sample++) {
+                final StringBuilder value = new StringBuilder();
+                final int count = 1 + random.nextInt(12);
+                for (int piece = 0; piece < count; piece++) {
+                    value.append(pieces[random.nextInt(pieces.length)]);
+                }
+                compareEveryOperation(value.toString());
+            }
+        }
+    }
+
+    @Test
+    void backwardRgbOwnerSurvivesOffsetsAndMalformedPrefixes() {
+        final String rgb = "\u00a7x\u00a71\u00a72\u00a7A\u00a7b\u00a75\u00a76";
+        for (int prefix = 0; prefix < 16; prefix++) {
+            for (int signs = 0; signs < 8; signs++) {
+                for (final String tail : new String[]{"", "\u00a7l\u00a7nEND", "\u00a7", "\u00a7z", "\u00a7r", "\u00a7a"}) {
+                    final String value = "p".repeat(prefix) + "\u00a7".repeat(signs) + rgb + tail;
+                    assertEquals(CC.getLastColors(value), CCPremium.getLastColors(value), value);
+                }
+            }
+        }
+    }
+
+    @Test
+    void stripPreservesLiteralSpansAndNoOpIdentity() {
+        final String literal = "\u732b\u00a7z plain \u00a7x\u00a7G trailing \u00a7";
+        assertSame(literal, CCPremium.stripColor(literal));
+        for (final String token : new String[]{
+                "\u00a7a",
+                "\u00a7L",
+                "\u00a7x\u00a71\u00a72\u00a73\u00a74\u00a75\u00a76"}) {
+            assertEquals("", CCPremium.stripColor(token.repeat(128)));
+            final String value = literal + token + "\ud800middle\udc00" + token + literal;
+            assertEquals(CC.stripColor(value), CCPremium.stripColor(value));
+        }
+    }
+
     private static void compareEveryOperation(final String value) {
         assertEquals(CC.translate(value), CCPremium.translate(value), "translate: " + value);
         assertEquals(CC.getLastColors(value), CCPremium.getLastColors(value), "last: " + value);
@@ -111,10 +187,20 @@ final class CCPremiumTest {
 
         if (value != null) {
             for (int max = -2; max <= value.length() + 2; max++) {
-                assertEquals(CC.safeSplitIndex(value, max), CCPremium.safeSplitIndex(value, max),
-                        "split max=" + max + ": " + value);
-                assertEquals(CC.truncate(value, max), CCPremium.truncate(value, max),
-                        "truncate max=" + max + ": " + value);
+                assertEquals(
+                        CC.safeSplitIndex(value, max),
+                        CCPremium.safeSplitIndex(value, max),
+                        "split max="
+                                + max
+                                + ": "
+                                + value);
+                assertEquals(
+                        CC.truncate(value, max),
+                        CCPremium.truncate(value, max),
+                        "truncate max="
+                                + max
+                                + ": "
+                                + value);
             }
         }
     }

@@ -1,12 +1,17 @@
 package it.dra4g;
 
 import org.bukkit.Bukkit;
+import sun.misc.Unsafe;
+
+import java.lang.reflect.Field;
 
 /**
- * Allocation-lean, branch-tight counterpart of {@link CC}.
+ * Allocation-lean, branch-tight counterpart of clòssic CC.
  *
  * <p>The public contract intentionally mirrors {@code CC}; internals use primitive
  * state, exact token probes and direct array writes to keep the hot path small.</p>
+ *
+ * @author @Dra4g
  */
 public final class CCPremium {
     public static final char COLOR_CHAR = '\u00a7';
@@ -27,6 +32,37 @@ public final class CCPremium {
      */
     private static volatile int H;
 
+    private static final Unsafe HEX_UNSAFE;
+    private static final Object HEX_BASE;
+    private static final long HEX_OFFSET;
+
+    static {
+        Unsafe access = null;
+        Object base = null;
+        long offset = 0;
+        try {
+            final Field singleton = Unsafe.class.getDeclaredField("theUnsafe");
+            singleton.setAccessible(true);
+            final Unsafe candidate = (Unsafe) singleton.get(null);
+            final Field state = CCPremium.class.getDeclaredField("H");
+            final Object candidateBase = candidate.staticFieldBase(state);
+            final long candidateOffset = candidate.staticFieldOffset(state);
+            /* Probe the actual operation once: --sun-misc-unsafe-memory-access=deny
+               must leave this class usable. Offsets come from the VM, NEVER
+               from a guessed object layout. H remains the sole state variable. */
+            candidate.getIntVolatile(candidateBase, candidateOffset);
+            access = candidate;
+            base = candidateBase;
+            offset = candidateOffset;
+        } catch (final ReflectiveOperationException | RuntimeException | LinkageError ignored) {
+            /* Unsupported/restricted runtime: keep the ordinary volatile read.
+               No exception handling or reflective lookup on the hot path. */
+        }
+        HEX_UNSAFE = access;
+        HEX_BASE = base;
+        HEX_OFFSET = offset;
+    }
+
     private CCPremium() {}
 
     public static String translate(final String s) {
@@ -37,35 +73,49 @@ public final class CCPremium {
         final int a;
         if ((a = s.indexOf(ALT_COLOR_CHAR)) < 0) return s;
 
+        /* Fast path above is intentional: most strings have no alternate color
+          code, so avoid copying them just to discover that nothing changed.
+           The scratch array below is reused as input/output space for expansion.
+        */
         final int mode = H;
+        /* buffer sizing scribble: a hex input token '&#RRGGBB' is 8 chars;
+           output is 14 chars ('§x' + 6 * '§h'), so +6 per complete token.
+
+             input length n   n>>>3 max tokens   extra chars   q
+                   7                0                0        7
+                   8                1                6       14
+                  16                2               12       28
+
+           q is an upper bound, not necessarily the final output length;
+           when hex is unsupported, mode<0 takes q=n. */
         final int q = mode < 0
                 ? n
                 : n + ((n >>> 3) * 6);
-        //noinspection ManualMinMaxCalculation
+        // noinspection ManualMinMaxCalculation
         final char[] o = new char[q < n ? n : q];
         final int base = o.length - n;
         s.getChars(0, n, o, base);
         if (a != 0) System.arraycopy(o, base, o, 0, a);
 
-        int i = a;
         int r = base + a;
         int w = a;
         int rgb = mode;
+        final int end = o.length;
 
-        while (i < n) {
+        while (r < end) {
             final char x = o[r];
-            if (x != ALT_COLOR_CHAR
-                    || i + 1
-                    >= n) {
+            if (x != ALT_COLOR_CHAR || r + 1 >= end) {
                 o[w++] = x;
-                i++;
                 r++;
                 continue;
             }
-
             final char y = o[r + 1];
             if (y == '#'
-                    && i + 7 < n) {
+                    && r + 7 < end) {
+                /* Hex expands much more than the two-character legacy codes.
+                  Keep this branch together with its bounds check; a partial
+                   token at the end must fall through as ordinary text.
+                 */
                 final char h0 = o[r + 2];
                 final char h1 = o[r + 3];
                 final char h2 = o[r + 4];
@@ -97,24 +147,59 @@ public final class CCPremium {
                         w += HEX_TOKEN_LENGTH;
                     } else {
                         o[w++] = COLOR_CHAR;
-                        o[w++] = near(h0, h1, h2, h3, h4, h5);
+                        int v = 0;
+                        /*noinspection ConstantValue*/
+                        v = (v << 4) | hv(h0);
+                        v = (v << 4) | hv(h1);
+                        v = (v << 4) | hv(h2);
+                        v = (v << 4) | hv(h3);
+                        v = (v << 4) | hv(h4);
+                        v = (v << 4) | hv(h5);
+
+                        final int rr = v >>> 16;
+                        final int gg = (v >>> 8) & 255;
+                        int bi = 15;
+                        final int bb = v & 255;
+                        long best = Long.MAX_VALUE;
+
+                        for (int palette = 0;
+                             palette < 16;
+                             palette++) {
+                            final int paletteColor = R[palette];
+                            final int cr = paletteColor >>> 16;
+                            final int dr = rr - cr;
+                            final int dg = gg - ((paletteColor >>> 8) & 255);
+                            final int db = bb - (paletteColor & 255);
+                            final int sr = rr + cr;
+                            final long d = (long) (1024 + sr)
+                                    * dr
+                                    * dr
+                                    + 2048L
+                                    * dg
+                                    * dg
+                                    + (long) (1534 - sr)
+                                    * db
+                                    * db;
+                            if (d < best) {
+                                best = d;
+                                bi = palette;
+                            }
+                        }
+                        o[w++] = C[bi];
                     }
-                    i += 8;
                     r += 8;
                     continue;
                 }
             }
 
-            //noinspection SuspiciousNameCombination
+            /*noinspection SuspiciousNameCombination*/
             final char z = lo(y);
             if (code(z)) {
                 o[w++] = COLOR_CHAR;
                 o[w++] = z;
-                i += 2;
                 r += 2;
             } else {
                 o[w++] = x;
-                i++;
                 r++;
             }
         }
@@ -123,13 +208,65 @@ public final class CCPremium {
     }
 
     public static boolean isHexSupported() {
-        final int h;
-        if ((h = H) != 0) return h > 0;
+        final int h = hexMode();
+        return h == 0 ? resolveHexSupport() : h > 0;
+    }
 
-        final int r;
-        if ((r = probe())
-                != 0)
-            H = r;
+    private static int hexMode() {
+        /* Same volatile semantics as translate's H read. A plain Unsafe getInt
+           could be hoisted out of a caller's loop; that is not a valid speedup.
+           Static-final access metadata lets the JIT specialize this choice. */
+        return HEX_UNSAFE == null ? H : HEX_UNSAFE.getIntVolatile(HEX_BASE, HEX_OFFSET);
+    }
+
+    private static boolean resolveHexSupport() {
+        int r;
+        try {
+            final String v = Bukkit.getServer().getBukkitVersion();
+            final int n = v.length();
+            int i = 0;
+            int major = 0;
+
+            if (n == 0) throw new NumberFormatException("empty version");
+            while (i < n) {
+                final char c = v.charAt(i);
+                if (c == '.'
+                        || c == '-')
+                    break;
+                if (c < '0'
+                        || c > '9')
+                    throw new NumberFormatException(v);
+                major = major * 10 + c - '0';
+                i++;
+            }
+
+            int minor = 0;
+            if (i < n
+                    && v
+                    .charAt(i++)
+                    == '.') {
+                if (i == n
+                        || v.charAt(i) < '0'
+                        || v.charAt(i) > '9')
+                    throw new NumberFormatException(v);
+                while (i < n) {
+                    final char c = v.charAt(i);
+                    if (c < '0'
+                            || c > '9')
+                        break;
+                    minor = minor * 10 + c - '0';
+                    i++;
+                }
+            }
+
+            r = major > 1
+                    || minor >= 16
+                    ? 1
+                    : -1;
+        } catch (final Throwable _) {
+            r = 1;
+        }
+        if (r != 0) H = r;
         return r >= 0;
     }
 
@@ -176,12 +313,20 @@ public final class CCPremium {
                 l = 0;
                 break;
             } else if (color(z)) {
-                final int hp;
-                if ((hp = owner(s, i)) >= 0) {
-                    p = hp;
+                p = i;
+                /* Backward scan meets the LAST digit of a complete RGB token
+                   first. Its owner can only be i - 12:
+                     header  digit 1  digit 2  ...  digit 6
+                       0        2        4           12
+                   No need to probe all six possible owners. Keep active():
+                   getLastColors consumes even invalid section-sign pairs. */
+                final int candidate = i - 12;
+                if (candidate >= 0
+                        && hex(s, candidate)
+                        && active(s, candidate)) {
+                    p = candidate;
                     l = HEX_TOKEN_LENGTH;
                 } else {
-                    p = i;
                     l = 2;
                     lc = z;
                 }
@@ -221,13 +366,11 @@ public final class CCPremium {
         for (int x = 0;
              x < 5;
              x++) {
-            if ((b & (1 << x))
-                    != 0) {
+            if ((b & (1 << x)) != 0) {
                 o[w++] = COLOR_CHAR;
                 o[w++] = (char) ('k' + x);
             }
         }
-
         return new String(o);
     }
 
@@ -263,10 +406,12 @@ public final class CCPremium {
      DO NOT turn this constant-time boundary check back into a full scan.
      */
     public static int safeSplitIndex(final String s,
+                                     /* callers use this at a visible-text boundary;
+                                       splitting inside a color token corrupts it.
+                                     */
                                      final int max) {
         if (s == null
-                || max
-                <= 0)
+                || max <= 0)
             return 0;
 
         final int n;
@@ -274,9 +419,7 @@ public final class CCPremium {
                 <= max)
             return n;
 
-        final int from;
-        from = Math.max(0, max - 13);
-        for (int i = from;
+        for (int i = Math.max(0, max - 13);
              i < max;
              i++) {
             if (s.charAt(i) == COLOR_CHAR
@@ -291,16 +434,16 @@ public final class CCPremium {
                 && code(lo(b)))
             return max - 1;
         if (Character.isHighSurrogate(a)
-                && Character.isLowSurrogate(b))
+                && Character
+                .isLowSurrogate(b))
             return max - 1;
         return max;
     }
 
-    public static String truncate(final String s, final int max) {
+    public static String truncate(final String s,
+                                  final int max) {
         if (s == null) return null;
-        if (s.length()
-                <= max)
-            return s;
+        if (s.length() <= max) return s;
         return s.substring(0, safeSplitIndex(s, max));
     }
 
@@ -320,8 +463,10 @@ public final class CCPremium {
         while (k < n) {
             if (s.charAt(k) == COLOR_CHAR
                     && k + 1 < n) {
-                final char z = lo(s.charAt(k + 1));
-                if ((z == 'x' && hexTail(s, k))
+                final char z;
+                if (((z = lo(s
+                        .charAt(k + 1))) == 'x'
+                        && hexTail(s, k))
                         || code(z))
                     break;
             }
@@ -330,8 +475,8 @@ public final class CCPremium {
 
         if (k == n) return s;
 
-        // The input copy is also the output buffer. Once a token is skipped,
-        // retained characters are compacted in place without a second array.
+        /* The input copy is also the output buffer. Once a token is skipped,
+           retained characters are compacted in place without a second array. */
         final char[] o = s.toCharArray();
         int w = k;
         i = k;
@@ -340,8 +485,9 @@ public final class CCPremium {
             final char x = o[i];
             if (x == COLOR_CHAR
                     && i + 1 < n) {
-                final char z = lo(o[i + 1]);
-                if (z == 'x'
+                final char z;
+                if ((z = lo(o[i + 1]))
+                        == 'x'
                         && hexTail(o, i, n)) {
                     i += HEX_TOKEN_LENGTH;
                     continue;
@@ -354,7 +500,6 @@ public final class CCPremium {
             o[w++] = x;
             i++;
         }
-
         return new String(o, 0, w);
     }
 
@@ -368,6 +513,11 @@ public final class CCPremium {
                 != 'x')
             return false;
 
+        return filter(s, i);
+    }
+
+    private static boolean filter(final String s,
+                                  final int i) {
         return ((s.charAt(i + 2) ^ COLOR_CHAR)
                 | (s.charAt(i + 4) ^ COLOR_CHAR)
                 | (s.charAt(i + 6) ^ COLOR_CHAR)
@@ -387,19 +537,7 @@ public final class CCPremium {
                                    final int i) {
         if (i + HEX_TOKEN_LENGTH > s.length()) return false;
 
-        return ((s.charAt(i + 2) ^ COLOR_CHAR)
-                | (s.charAt(i + 4) ^ COLOR_CHAR)
-                | (s.charAt(i + 6) ^ COLOR_CHAR)
-                | (s.charAt(i + 8) ^ COLOR_CHAR)
-                | (s.charAt(i + 10) ^ COLOR_CHAR)
-                | (s.charAt(i + 12) ^ COLOR_CHAR))
-                == 0
-                && hx(s.charAt(i + 3))
-                && hx(s.charAt(i + 5))
-                && hx(s.charAt(i + 7))
-                && hx(s.charAt(i + 9))
-                && hx(s.charAt(i + 11))
-                && hx(s.charAt(i + 13));
+        return filter(s, i);
     }
 
     private static boolean hexTail(final char[] s,
@@ -422,30 +560,11 @@ public final class CCPremium {
                 && hx(s[i + 13]);
     }
 
-    private static int owner(final String s,
-                             final int i) {
-        if (hex(s, i)) return i;
-
-        final int q;
-        q = Math.max(0, i - 12);
-        for (int p = q;
-             p + 2 <= i;
-             p += 2) {
-            if (s.charAt(p) == COLOR_CHAR
-                    && lo(s.charAt(p + 1)) == 'x'
-                    && active(s, p)
-                    && hex(s, p))
-                return p;
-        }
-        return -1;
-    }
-
     private static boolean active(final String s,
                                   final int i) {
         int p = i;
         while (p > 0
-                && s
-                .charAt(p - 1)
+                && s.charAt(p - 1)
                 == COLOR_CHAR)
             p--;
         return ((i - p) & 1) == 0;
@@ -472,8 +591,8 @@ public final class CCPremium {
                 && d < 10
                 ? d
                 : (x | 32)
-                  - 'a'
-                  + 10;
+                - 'a'
+                + 10;
     }
 
     private static char lo(final char x) {
@@ -499,105 +618,5 @@ public final class CCPremium {
                 && x <= 'o')
                 || x == 'r';
     }
-    private static char near(final char h0,
-                             final char h1,
-                             final char h2,
-                             final char h3,
-                             final char h4,
-                             final char h5) {
-        int v = 0;
-        //noinspection ConstantValue
-        v = (v << 4) | hv(h0);
-        v = (v << 4) | hv(h1);
-        v = (v << 4) | hv(h2);
-        v = (v << 4) | hv(h3);
-        v = (v << 4) | hv(h4);
-        v = (v << 4) | hv(h5);
 
-        final int rr = v >>> 16;
-        final int gg = (v >>> 8) & 255;
-        int bi = getBi(v, rr, gg);
-
-        return C[bi];
-    }
-
-    private static int getBi(int v,
-                             int rr,
-                             int gg) {
-        final int bb = v & 255;
-        long best = Long.MAX_VALUE;
-        int bi = 15;
-
-        for (int i = 0;
-             i < 16;
-             i++) {
-            final int q = R[i];
-            final int cr = q >>> 16;
-            final int dr = rr - cr;
-            final int dg = gg - ((q >>> 8) & 255);
-            final int db = bb - (q & 255);
-            final int sr = rr + cr;
-            final long d = (long) (1024 + sr) * dr * dr
-                    + 2048L * dg * dg
-                    + (long) (1534 - sr) * db * db;
-            if (d < best) {
-                best = d;
-                bi = i;
-            }
-        }
-        return bi;
-    }
-
-    /*
-     Parse only major/minor directly from Bukkit's version string.
-     A zero result is NEVER cached because the server may not exist yet.
-     */
-    private static int probe() {
-        try {
-            final String v = Bukkit.getServer().getBukkitVersion();
-            final int n = v.length();
-            int i = 0;
-            int major = 0;
-
-            if (n == 0) throw new NumberFormatException("empty version");
-            while (i < n) {
-                final char c = v.charAt(i);
-                if (c == '.'
-                        || c == '-')
-                    break;
-                if (c < '0'
-                        || c > '9')
-                    throw new NumberFormatException(v);
-                major = major * 10 + c - '0';
-                i++;
-            }
-
-            int minor = 0;
-            if (i < n
-                    && v
-                    .charAt(i++)
-                    == '.') {
-                if (i == n
-                        || v.charAt(i) < '0'
-                        || v.charAt(i) > '9')
-                    throw new NumberFormatException(v);
-                while (i < n) {
-                    final char c = v.charAt(i);
-                    if (c < '0'
-                            || c
-                            > '9')
-                        break;
-                    minor = minor * 10 + c - '0';
-                    i++;
-                }
-            }
-
-            return major > 1
-                    || minor >= 16
-                    ? 1
-                    : -1;
-        } catch (final Throwable _) {
-            return 1;
-        }
-    }
 }
