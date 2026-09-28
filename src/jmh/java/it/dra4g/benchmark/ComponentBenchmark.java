@@ -47,12 +47,17 @@ public class ComponentBenchmark {
             .build();
     private static final PlainTextComponentSerializer PLAIN = PlainTextComponentSerializer.plainText();
 
-    @Param({"auction", "plain", "gradient"})
+    @Param({"plain", "gradient"})
     public String scenario;
     private String raw;
     private Component component;
 
     static void main(final String[] args) throws Exception {
+        run(args, false);
+    }
+
+    static void run(final String[] args,
+                    final boolean gradients) throws Exception {
         boolean quick = false;
         final List<String> forwarded = new ArrayList<>(args.length);
         for (final String argument : args) {
@@ -100,7 +105,7 @@ public class ComponentBenchmark {
                 "build",
                 "reports",
                 "jmh",
-                "components",
+                gradients ? "gradients" : "components",
                 quick
                 ? "quick"
                 : forwarded.isEmpty()
@@ -120,7 +125,7 @@ public class ComponentBenchmark {
                 .result(json.toString());
         if (cli.getIncludes()
                 .isEmpty())
-            builder.include(ComponentBenchmark.class.getName());
+            builder.include(gradients ? GradientBenchmark.class.getName() : ComponentBenchmark.class.getName());
         if (quick) {
             builder.warmupIterations(cli
                             .getWarmupIterations()
@@ -144,23 +149,36 @@ public class ComponentBenchmark {
             return;
         }
         if (cli.shouldListWithParams()) {
-            runner.listWithParams(cli);
+            /* Unlike list()/run(), JMH's parameter listing reads this CLI
+               directly instead of the builder's options. Keep its filter too. */
+            if (cli.getIncludes()
+                    .isEmpty()) {
+                final List<String> listing = new ArrayList<>(forwarded);
+                listing.add(gradients
+                        ? GradientBenchmark.class.getName()
+                        : ComponentBenchmark.class.getName());
+                runner.listWithParams(new CommandLineOptions(listing.toArray(String[]::new)));
+            } else {
+                runner.listWithParams(cli);
+            }
             return;
         }
         Files.createDirectories(reportDir);
         Files.createDirectories(json.toAbsolutePath().getParent());
         final Collection<RunResult> results = runner.run();
-        final List<ComponentBenchmarkReport.Row> rows = ComponentBenchmarkReport.rows(results);
+        final List<ComponentBenchmarkReport.Row> rows = ComponentBenchmarkReport.rows(results, gradients);
         System.out.print(ComponentBenchmarkReport.render(
                 rows,
                 label,
-                true));
+                true,
+                gradients));
         final Path summary = reportDir.resolve("summary.txt");
         Files.writeString(summary,
                 ComponentBenchmarkReport.render(
                         rows,
                         label,
-                        false),
+                        false,
+                        gradients),
                 StandardCharsets.UTF_8);
         System.out.println("JSON: " + json.toAbsolutePath());
         System.out.println("Summary: " + summary.toAbsolutePath());
@@ -169,8 +187,7 @@ public class ComponentBenchmark {
     @Setup(Level.Trial)
     public void setup() {
         raw = switch (scenario) {
-            case "auction" -> "&l&#C8A96A✦ &#E2C275CLICK TO PURCHASE &r&#A67C3D150.00";
-            case "plain" -> "Auction listing: diamond sword 猫 \ud83d\udc31";
+            case "plain" -> "Example message: sample string 猫 \ud83d\udc31";
             case "gradient" -> "&#00E0FF&lP&#24C7F4&lR&#489FE9&lE&#6C77DE&lM"
                     + "&#904FD3&lI&#B427C8&lU&#D800BD&lM";
             default -> throw new IllegalArgumentException(scenario);

@@ -100,6 +100,35 @@ public final class CCPremium {
         return CCComponents.literal(text, rgb);
     }
 
+    /* Literal text, equally spaced RGB stops. The two-stop overload avoids a
+       varargs array; reuse an int[] palette when rendering dynamic names. */
+    public static Component gradient(final String text,
+                                     final int first,
+                                     final int last) {
+        return CCGradient.create(
+                text,
+                first,
+                last,
+                null);
+    }
+
+    public static Component gradient(final String text,
+                                     final int... colors) {
+        if (colors == null) throw new NullPointerException("colors");
+        if (colors.length < 2) throw new IllegalArgumentException("A gradient needs at least two colors");
+        return CCGradient.create(
+                text,
+                colors[0],
+                colors[colors.length - 1],
+                colors);
+    }
+
+    /* Prepare once when the palette belongs to a menu/configuration. The
+       snapshot owns its colors; apply() never retains player names or output. */
+    public static GradientPalette gradientPalette(final int... colors) {
+        return new GradientPalette(colors);
+    }
+
     public static String plainText(final Component component) {
         return CCComponents.write(component, false);
     }

@@ -1,6 +1,7 @@
 package it.dra4g.benchmark;
 
 import it.dra4g.CCPremium;
+import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.openjdk.jmh.annotations.Mode;
 import org.openjdk.jmh.results.RunResult;
@@ -21,7 +22,7 @@ final class ComponentBenchmarkReport {
     private static final String RED = "\u001b[38;2;255;100;100m";
     private static final String RULE = "+----------------------+------------+-----------------------+-----------------------+-----------+-----------+";
     private static final String ROW = "| %-20s | %-10s | %21s | %21s | %9s | %9s |";
-    private static final String[] SCENARIOS = {"auction", "plain", "gradient"};
+    private static final String[] SCENARIOS = {"plain", "gradient"};
     private static final String[] OPERATIONS = {"component", "plainText", "serialize"};
 
     private ComponentBenchmarkReport() {}
@@ -35,9 +36,12 @@ final class ComponentBenchmarkReport {
     private record Key(String method,
                        String scenario) {}
 
-    static List<Row> rows(final Collection<RunResult> results) {
+    static List<Row> rows(final Collection<RunResult> results,
+                          final boolean gradients) {
         final Map<Key, Score> scores = new HashMap<>();
-        final String prefix = ComponentBenchmark.class.getName() + '.';
+        final String prefix = (gradients
+                ? GradientBenchmark.class.getName()
+                : ComponentBenchmark.class.getName()) + '.';
         for (final RunResult result : results) {
             final String benchmark;
             if (!(benchmark = result
@@ -62,8 +66,43 @@ final class ComponentBenchmarkReport {
                             result.getPrimaryResult()
                                     .getScoreError()));
         }
-        final List<Row> rows = new ArrayList<>(9);
-        for (final String scenario : SCENARIOS) {
+        final String[] scenarios = gradients ? new String[]{
+                "two",
+                "multi",
+                "unicode",
+                "long",
+                "flat"} : SCENARIOS;
+        final List<Row> rows = new ArrayList<>(
+                scenarios.length
+                        * (gradients
+                        ? 5
+                        : OPERATIONS.length));
+        for (final String scenario : scenarios) {
+            if (gradients) {
+                final Score premium = scores.get(new Key("gradient__premium", scenario));
+                for (final String reference : new String[]{"kyori", "miniMessage"}) {
+                    final Score baseline = scores.get(new Key("gradient__" + reference, scenario));
+                    if (baseline != null
+                            || premium != null) rows.add(new Row(reference.equals("kyori")
+                            ? "vs Kyori lerp"
+                            : "vs MiniMessage",
+                            scenario, baseline, premium));
+                }
+                final Score prepared = scores.get(
+                        new Key("gradient__prepared",
+                        scenario));
+                if (prepared != null) {
+                    rows.add(new Row("prepared/Kyori", scenario,
+                            scores.get(new Key("gradient__kyori", scenario)),
+                            prepared));
+                    rows.add(new Row("prepared/MiniMessage", scenario,
+                            scores.get(new Key("gradient__miniMessage", scenario)),
+                            prepared));
+                }
+                final Score cold = scores.get(new Key("gradient__coldPalette", scenario));
+                if (cold != null) rows.add(new Row("cold palette", scenario, null, cold));
+                continue;
+            }
             for (final String op : OPERATIONS) {
                 final String reference = op.equals("component")
                         ? "previousPipeline"
@@ -91,12 +130,21 @@ final class ComponentBenchmarkReport {
 
     static String render(final List<Row> rows,
                          final String label,
-                         final boolean ansi) {
+                         final boolean ansi,
+                         final boolean gradients) {
         final StringBuilder output = new StringBuilder(6_144);
-        line(output, " CC COMPONENT NANOSECOND ARENA  [" + label + "]", CYAN, ansi);
+        line(output, " CC "
+                + (gradients
+                ? "GRADIENT"
+                : "COMPONENT")
+                + " NANOSECOND ARENA  ["
+                + label
+                + "]",
+                CYAN,
+                ansi);
         output.append('\n');
         line(output, " RGB GRADIENT OUTPUT COMPARISON", GRAY, ansi);
-        appendGradients(output, ansi);
+        appendGradients(output, ansi, gradients);
         output.append('\n');
         line(output, RULE, GRAY, ansi);
         line(output,
@@ -159,8 +207,17 @@ final class ComponentBenchmarkReport {
         line(output, "ns/op = average time per operation. LOWER IS BETTER. +/- = JMH score error.", GRAY, ansi);
         line(output, "Speedup = reference time / CC-Premium time. 2.00x means half the time; below 1.00x means slower.", GRAY, ansi);
         line(output, "Green: >= 2x faster. Yellow: 1x to < 2x. Red: slower than the reference.", GRAY, ansi);
-        line(output, "* component: previous pipeline (CCPremium.translate + Kyori deserialize).", GRAY, ansi);
-        line(output, "* plainText / serialize: direct comparison against the Kyori serializer.", GRAY, ansi);
+        if (gradients) {
+            line(output, "* vs Kyori lerp: direct TextColor.lerp loop, with prebuilt colors and a flat-palette shortcut.", GRAY, ansi);
+            line(output, "* vs MiniMessage: gradient tag with a literal text placeholder; template prepared outside measurement.", GRAY, ansi);
+            line(output, "* vs rows: existing gradient(text, colors) API with bounded palette/length plan reuse after warmup.", GRAY, ansi);
+            line(output, "* prepared rows: reusable GradientPalette.apply(text); palette creation excluded, plans warmed up.", GRAY, ansi);
+            line(output, "* cold palette: new palette + plan + output every call, shown separately without a speedup target.", GRAY, ansi);
+            line(output, "* Plans retain only colors/styles and run ends. No names or output components are cached.", GRAY, ansi);
+        } else {
+            line(output, "* component: previous pipeline (CCPremium.translate + Kyori deserialize).", GRAY, ansi);
+            line(output, "* plainText / serialize: direct comparison against the Kyori serializer.", GRAY, ansi);
+        }
         line(output, "PASS/MISS uses the mean speedup against the 2x target, not a statistical significance test.", GRAY, ansi);
         return output.toString();
     }
@@ -186,7 +243,23 @@ final class ComponentBenchmarkReport {
     }
 
     private static void appendGradients(final StringBuilder output,
-                                        final boolean ansi) {
+                                        final boolean ansi,
+                                        final boolean generated) {
+        if (generated) {
+            final String text = "|".repeat(96);
+            final int[] colors = {
+                    0xFF0000,
+                    0xFFFF00,
+                    0x00FF00,
+                    0x00FFFF,
+                    0x0000FF,
+                    0xFF00FF,
+                    0xFF0000};
+            gradient(output, "MiniMessage", CCPremium.serialize(MiniMessage.miniMessage().deserialize(
+                    "<gradient:#ff0000:#ffff00:#00ff00:#00ffff:#0000ff:#ff00ff:#ff0000>" + text + "</gradient>")), ansi);
+            gradient(output, "CC-Premium", CCPremium.serialize(CCPremium.gradient(text, colors)), ansi);
+            return;
+        }
         final StringBuilder raw = new StringBuilder(480);
         for (int i = 0; i < 48; i++) {
             final int sector = i / 8;
